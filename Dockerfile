@@ -15,9 +15,9 @@ LABEL name="k8s-device-plugin" \
       summary="The NVIDIA device plugin for Kubernetes" \
       description="Daemonset that allows you to automatically expose the number of GPUs on each nodes of your cluster,keep track of the health of your GPUs, run GPU enabled containers in your Kubernetes cluster." 
 
-#Adding Licenses and Help file
+#Adding Licenses 
 COPY licenses /licenses
-COPY help.1 /help.1
+
 
 #RUN NVIDIA_GPGKEY_SUM=d1be581509378368edeec8c1eb2958702feedf3bc3d17011adbf24efacce4ab5 && \
 #    curl -fsSL https://developer.download.nvidia.com/compute/cuda/repos/rhel7/x86_64/7fa2af80.pub | sed '/^Version/d' > /etc/pki/rpm-gpg/RPM-GPG-KEY-NVIDIA && \
