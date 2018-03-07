@@ -8,32 +8,16 @@ FROM registry.access.redhat.com/rhel7:latest
 LABEL maintainer "NVIDIA CORPORATION <cudatools@nvidia.com>"
 
 ### Add Atomic/OpenShift Labels - https://github.com/projectatomic/ContainerApplicationGenericLabels#####
-LABEL name="k8s-plugin" \
+LABEL name="k8s-device-plugin" \
       vendor="Nvidia" \
       version="1.9" \
       release="1" \
-      #run='docker run -d -p 8080:80 --name=yanai-app yanai-app' \
-      summary="Kubernetes Plugin from Nvidia" \
-      description="Plugin will do ....." 
+      summary="The NVIDIA device plugin for Kubernetes" \
+      description="Daemonset that allows you to automatically expose the number of GPUs on each nodes of your cluster,keep track of the health of your GPUs, run GPU enabled containers in your Kubernetes cluster." 
 
-### Atomic Help File - Write in Markdown, it will be converted to man format at build time.
-### https://github.com/projectatomic/container-best-practices/blob/master/creating/help.adoc
-
-#COPY help.md /tmp/help.md
+#Adding Licenses and Help file
 COPY licenses /licenses
 COPY help.1 /help.1
-
-#### Add necessary Red Hat repos here
-#RUN REPOLIST=rhel-7-server-rpms,rhel-7-server-optional-rpms \
-### Add your package needs here
-#    INSTALL_PKGS="golang-github-cpuguy83-go-md2man" && \
-#    yum -y update-minimal --disablerepo "*" --enablerepo rhel-7-server-rpms --setopt=tsflags=nodocs \
-#      --security --sec-severity=Important --sec-severity=Critical && \
-#    yum -y install --disablerepo "*" --enablerepo ${REPOLIST} --setopt=tsflags=nodocs ${INSTALL_PKGS} && \
-
-### help file markdown to man conversion
-#   go-md2man -in /tmp/help.md -out /help.1
-
 
 #RUN NVIDIA_GPGKEY_SUM=d1be581509378368edeec8c1eb2958702feedf3bc3d17011adbf24efacce4ab5 && \
 #    curl -fsSL https://developer.download.nvidia.com/compute/cuda/repos/rhel7/x86_64/7fa2af80.pub | sed '/^Version/d' > /etc/pki/rpm-gpg/RPM-GPG-KEY-NVIDIA && \
