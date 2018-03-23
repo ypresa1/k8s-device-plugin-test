@@ -38,8 +38,8 @@ RUN REPOLIST=rhel-7-server-rpms,rhel-7-server-extras-rpms,rhel-7-server-optional
       --security --sec-severity=Important --sec-severity=Critical && \
     yum -y install --disablerepo "*" --enablerepo ${REPOLIST} --setopt=tsflags=nodocs ${INSTALL_PKGS} && \
 ### help file markdown to man conversion
-    go-md2man -in /tmp/help.md -out /help.1 && \
-    yum clean all
+ #   go-md2man -in /tmp/help.md -out /help.1 && \
+ # yum clean all
 
 COPY system/docker/redhat/firedrill/etc /etc
 COPY 3rdparty/phantomjs/phantomjs /usr/bin/
