@@ -43,9 +43,5 @@ RUN REPOLIST=rhel-7-server-rpms,rhel-7-server-extras-rpms,rhel-7-server-optional
 
 ### Install Python dependencies
 RUN pip install --upgrade pip setuptools
-COPY requirements.txt .
-RUN pip install -r requirements.txt
 
-### Containers should NOT run as root as a good practice
-USER 10001
 
