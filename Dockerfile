@@ -1,115 +1,99 @@
-# build stage goes base --> devel --> plugin
-#Consolodating 3 Dockerfiles into a single build
+FROM registry.access.redhat.com/rhel7/rhel
+MAINTAINER AttackIQ, Inc. <info@attackiq.com>
 
-#Begin base image build stage 1
-#https://gitlab.com/nvidia/cuda/blob/centos7/9.1/base/Dockerfile
+### Atomic/OpenShift Labels - https://github.com/projectatomic/ContainerApplicationGenericLabels
+LABEL name="attackiq/firedrill-server" \
+      maintainer="info@attackiq.com" \
+      vendor="AttackIQ, Inc." \
+      version="2.6" \
+      release="27" \
+      summary="AttackIQ FireDrill Server" \
+      description="Industry's first live IT accountability platform that continuously challenges your security assumptions, providing qualtifiable data to accurately protect, detect, and respond to cybersecurity threats."
 
-FROM registry.access.redhat.com/rhel7:latest
-LABEL maintainer "NVIDIA CORPORATION <cudatools@nvidia.com>"
+### Atomic Help File - Write in Markdown, it will be converted to man format at build time.
+### https://github.com/projectatomic/container-best-practices/blob/master/creating/help.adoc
+#COPY help.md /tmp/
 
-### Add Atomic/OpenShift Labels - https://github.com/projectatomic/ContainerApplicationGenericLabels#####
-LABEL name="k8s-device-plugin" \
-      vendor="Nvidia" \
-      version="1.9" \
-      release="1" \
-      summary="The NVIDIA device plugin for Kubernetes" \
-      description="Daemonset that allows you to automatically expose the number of GPUs on each nodes of your cluster,keep track of the health of your GPUs, run GPU enabled containers in your Kubernetes cluster." 
-
-#Adding Licenses 
+# Required by rhc4tp
 COPY licenses /licenses
 
+### Install additional repos
+RUN yum -y install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm && \
+    yum -y install -y https://download.postgresql.org/pub/repos/yum/9.6/redhat/rhel-7-x86_64/pgdg-redhat96-9.6-3.noarch.rpm
 
-#RUN NVIDIA_GPGKEY_SUM=d1be581509378368edeec8c1eb2958702feedf3bc3d17011adbf24efacce4ab5 && \
-#    curl -fsSL https://developer.download.nvidia.com/compute/cuda/repos/rhel7/x86_64/7fa2af80.pub | sed '/^Version/d' > /etc/pki/rpm-gpg/RPM-GPG-KEY-NVIDIA && \
-#    echo "$NVIDIA_GPGKEY_SUM  /etc/pki/rpm-gpg/RPM-GPG-KEY-NVIDIA" | sha256sum -c --strict -
+### Add necessary Red Hat repos here
+RUN REPOLIST=rhel-7-server-rpms,rhel-7-server-extras-rpms,rhel-7-server-optional-rpms,epel,pgdg96 \
+# Install dependencies:
+# git - required by the happy-api python package
+# libxml2-dev libxslt-dev lib32z1-dev libpq-dev libsasl2-dev libldap2-dev libssl-dev libffi-dev unzip zip - required libraries
+# python-pip python-virtualenv python-dev python-lxml python-setuptools - python dependencies
+# mono-devel nsis - used for building agent installers
+# ntpdate ntp - to keep time up to date
+# supervisor - used to run uWSGI, celery workers, celery beat
+    INSTALL_PKGS="wget git gcc glibc-devel.i686 glibc-devel make automake gcc-c++ kernel-devel openssl-devel \
+                  openldap-devel libxml2-devel libxslt-devel ntpdate ntp unzip postgresql-libs postgresql96-server \
+                  python-virtualenv python-devel python-lxml python-setuptools python-psycopg2 supervisor firewalld \
+                  fabric python-pip python2-pip mono-devel mingw32-nsis supervisor redis golang-github-cpuguy83-go-md2man" && \
+    yum -y update-minimal --disablerepo "*" --enablerepo rhel-7-server-rpms --setopt=tsflags=nodocs \
+      --security --sec-severity=Important --sec-severity=Critical && \
+    yum -y install --disablerepo "*" --enablerepo ${REPOLIST} --setopt=tsflags=nodocs ${INSTALL_PKGS} && \
+### help file markdown to man conversion
+    go-md2man -in /tmp/help.md -out /help.1 && \
+    yum clean all
 
-#cuda.repo if from local repo to save bandwidth
-COPY cuda.repo /etc/yum.repos.d/cuda.repo
+COPY system/docker/redhat/firedrill/etc /etc
+COPY 3rdparty/phantomjs/phantomjs /usr/bin/
+COPY 3rdparty/phantomjs/phantomjs /usr/lib/phantomjs/
+RUN chmod +x /usr/bin/phantomjs && \
+    chmod +x /usr/lib/phantomjs/phantomjs && \
+    ln -s /usr/bin/uwsgi /usr/local/bin/uwsgi
 
-ENV CUDA_VERSION 9.1.85
+### Setup user for build execution and application runtime
+ENV APP_ROOT=/opt/attackiq/firedrill-server \
+    APP_ETC=/var/lib/attackiq \
+    USER_NAME=firedrill \
+    USER_UID=10001
+ENV LOG_DIR=${APP_ETC}/logs \
+    DOWNLOADS_DIR=${APP_ETC}/downloads \
+    DOWNLOADS_AIQ_DIR=${APP_ETC}/downloads_attackiq
+RUN mkdir -p ${APP_ROOT} && chmod -R u+x ${APP_ROOT} && \
+    mkdir -p ${APP_ETC} && chmod -R u+x ${APP_ETC} && \
+    useradd -l -u ${USER_UID} -r -g 0 -d ${APP_ROOT} -s /sbin/nologin -c "${USER_NAME} user" ${USER_NAME} && \
+    usermod -aG wheel ${USER_NAME} && \
+    chown -R ${USER_NAME}:wheel ${APP_ROOT} && \
+    chmod -R g=u ${APP_ROOT} && \
+    chown -R ${USER_NAME}:wheel ${APP_ETC} && \
+    chmod -R g=u ${APP_ETC} && \
+    mkdir -p ${APP_ROOT}/system/docker/firedrill && \
+    mkdir -p /usr/lib/phantomjs && \
+    mkdir -p ${LOG_DIR} && \
+    mkdir -p ${DOWNLOADS_DIR} && \
+    mkdir -p ${DOWNLOADS_DIR} && \
+    touch ${APP_ROOT}/.ai_build
 
-ENV CUDA_PKG_VERSION 9-1-$CUDA_VERSION-1
-RUN yum install -y \
-          cuda-cudart-$CUDA_PKG_VERSION && \
-    ln -s cuda-9.1 /usr/local/cuda
-#    ln -s cuda-9.1 /usr/local/cuda && \
-#    rm -rf /var/cache/yum/*
+WORKDIR ${APP_ROOT}
 
+# Using a dynamic ARG here so we always invalidate the Docker cache and re-build the below layers (since they could change based on git branch).
+# References: https://stackoverflow.com/questions/31782220/how-can-i-prevent-a-dockerfile-instruction-from-being-cached, https://github.com/moby/moby/issues/22832
+# Have to set a value here so it will always change
+ARG CACHE_BUILD
+# first usage of the ARG will invalidate the cache - https://github.com/moby/moby/issues/20136
+RUN echo $CACHE_BUILD
 
-# nvidia-docker 1.0
-LABEL com.nvidia.volumes.needed="nvidia_driver"
-LABEL com.nvidia.cuda.version="${CUDA_VERSION}"
+### Install Python dependencies
+RUN pip install --upgrade pip setuptools
+COPY requirements.txt .
+RUN pip install -r requirements.txt
 
-RUN echo "/usr/local/nvidia/lib" >> /etc/ld.so.conf.d/nvidia.conf && \
-    echo "/usr/local/nvidia/lib64" >> /etc/ld.so.conf.d/nvidia.conf
+### Containers should NOT run as root as a good practice
+USER 10001
 
-ENV PATH /usr/local/nvidia/bin:/usr/local/cuda/bin:${PATH}
-ENV LD_LIBRARY_PATH /usr/local/nvidia/lib:/usr/local/nvidia/lib64
-
-# nvidia-container-runtime
-ENV NVIDIA_VISIBLE_DEVICES all
-ENV NVIDIA_DRIVER_CAPABILITIES compute,utility
-ENV NVIDIA_REQUIRE_CUDA "cuda>=9.1"
-
-#End base image build stage 1
-
-#Begin devel stage 2
-#https://gitlab.com/nvidia/cuda/blob/centos7/9.1/devel/Dockerfile
-
-RUN yum install -y \
-        cuda-libraries-dev-$CUDA_PKG_VERSION \
-        cuda-nvml-dev-$CUDA_PKG_VERSION \
-        cuda-minimal-build-$CUDA_PKG_VERSION \
-        cuda-command-line-tools-$CUDA_PKG_VERSION
-#        cuda-command-line-tools-$CUDA_PKG_VERSION && \
-#    rm -rf /var/cache/yum/*
-
-ENV LIBRARY_PATH /usr/local/cuda/lib64/stubs:${LIBRARY_PATH}
-
-#End devel stage 2
-
-#Begin plugin stage 3
-#https://github.com/NVIDIA/k8s-device-plugin/blob/v1.9/Dockerfile
-
-RUN yum install -y http://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
-#    && yum clean all
-
-RUN yum install -y \
-        gcc \
-        ca-certificates \
-        wget \
-        dkms
-
-RUN yum install -y \
-        cuda-cudart-dev-$CUDA_PKG_VERSION \
-        cuda-misc-headers-$CUDA_PKG_VERSION \
-        cuda-nvml-dev-$CUDA_PKG_VERSION 
-       
-ENV GOLANG_VERSION 1.9.4
-RUN wget -nv -O - https://golang.org/dl/go${GOLANG_VERSION}.linux-amd64.tar.gz \
-  | tar -C /usr/local -xz
- 
-
-ENV GOPATH /go
-ENV PATH $GOPATH/bin:/usr/local/go/bin:$PATH
-
-ENV CGO_CFLAGS "-I /usr/local/cuda-8.0/include"
-ENV CGO_LDFLAGS "-L /usr/local/cuda-8.0/lib64"
-ENV PATH=$PATH:/usr/local/nvidia/bin:/usr/local/cuda/bin
-
-WORKDIR /go/src/nvidia-device-plugin
-COPY . .
-
-#RUN export CGO_LDFLAGS_ALLOW='-Wl,--unresolved-symbols=ignore-in-object-files' && \
- #   go install -ldflags="-s -w" -v nvidia-device-plugin
-#RUN go install -v nvidia-device-plugin
-
-#FROM debian:stretch-slim
-#The above line shouldn't be needed. All utilities should be included
-
-ENV NVIDIA_VISIBLE_DEVICES=all
-ENV NVIDIA_DRIVER_CAPABILITIES=utility
-
-#COPY --from=build /go/bin/nvidia-device-plugin /usr/bin/nvidia-device-plugin
-
-CMD ["nvidia-device-plugin"]
+### Copy required files
+COPY system/docker/redhat/firedrill/*.ini system/docker/firedrill/
+COPY system/docker/redhat/celerybeat system/docker/celerybeat
+COPY system/docker/redhat/celeryworker system/docker/celeryworker
+COPY dogstatsd_plugin.so .
+COPY licenses licenses
+COPY community community
+COPY error-pages error-pages
+COPY update-page update-page
